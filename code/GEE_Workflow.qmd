@@ -267,6 +267,9 @@ var properties = feature.properties;
 
 // Create cleaner display names for selected areas
 var displayArea =
+properties.area === 'Antarctic' ? 'Antarctic (Japan/USSR)' :
+properties.area === 'Atlantic N' ? 'Atlantic N (Norway)' :
+properties.area === 'Atlantic NE' ? 'Atlantic NE (Norway)' :
 properties.area === 'CanadaW,Arctic' ? 'Arctic (Canada)' :
 properties.area === 'Canada HudsnBy' ? 'Hudson Bay (Canada)' :
 properties.area === 'W.Indies' ? 'West Indies' :
