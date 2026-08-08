@@ -1,0 +1,21 @@
+area,ocean,total_catch,dominant_operation,aboriginal_catch,aboriginal_pct,commercial_catch,commercial_pct,illegal_catch,illegal_pct,special_permit_catch,special_permit_pct,unknown_catch,unknown_pct,min_lat,max_lat,min_lon,max_lon
+Indonesia,IO,612,Unknown,0,0,0,0,0,0,0,0,612,100,-11,-5,120,126
+Atlantic N,NA,3466,Commercial,0,0,3466,100,0,0,0,0,0,0,40,85,-70,59
+Atlantic NE,NA,13873,Commercial,0,0,13583,97.9,1,0,289,2.1,0,0,55,85,-44,32
+Azores,NA,3,Commercial,0,0,3,100,0,0,0,0,0,0,36,40,-30,-26
+Canada HudsnBy,NA,52,Aboriginal,52,100,0,0,0,0,0,0,0,0,58,73,-93,-65
+Greenland E,NA,375,Aboriginal,374,99.7,0,0,1,0.3,0,0,0,0,60,71,-44,-20
+Greenland W,NA,6162,Aboriginal,6161,100,0,0,1,0,0,0,0,0,59,74,-58,-44
+Iceland,NA,654,Commercial,0,0,454,69.4,0,0,200,30.6,0,0,61,72,-33,-8
+Iceland W,NA,1386,Commercial,0,0,1024,73.9,0,0,362,26.1,0,0,61,68,-33,-16
+W.Indies,NA,51,Aboriginal,51,100,0,0,0,0,0,0,0,0,11,15,-63,-58
+Alaska N,NP,2047,Aboriginal,2045,99.9,0,0,2,0.1,0,0,0,0,61,74,-175,-145
+Bonin Is,NP,621,Commercial,0,0,621,100,0,0,0,0,0,0,19,31,138,148
+"CanadaW,Arctic",NP,2,Aboriginal,2,100,0,0,0,0,0,0,0,0,62,75,-135,-110
+Chukotka,NP,4648,Aboriginal,4648,100,0,0,0,0,0,0,0,0,60,70,-168,168
+Japan,NP,2741,Special permit,0,0,1156,42.2,0,0,1585,57.8,0,0,27,47,123,153
+JapnN/Kuril Is,NP,311,Commercial,0,0,311,100,0,0,0,0,0,0,42,50,140,155
+Korea,NP,258,Illegal,0,0,0,0,189,73.3,69,26.7,0,0,32,40,122,132
+Pacific NW,NP,5289,Special permit,0,0,1301,24.6,0,0,3988,75.4,0,0,35,70,-164,130
+USA W coast,NP,2,Aboriginal,2,100,0,0,0,0,0,0,0,0,31,50,-128,-118
+Antarctic,SH,17033,Special permit,0,0,4969,29.2,0,0,12064,70.8,0,0,-84,-36,-180,180

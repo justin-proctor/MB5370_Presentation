@@ -1,1 +1,1 @@
-This folder is for saving project outputs
+This folder is for saving project outputs/figures

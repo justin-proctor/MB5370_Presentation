@@ -1,0 +1,406 @@
+---
+title: "GEE Workflow"
+author: "Justin Proctor"
+format: html
+editor: visual
+---
+
+# Workflow to create global whaling activity map on Google Earth Engine using JavaScript
+
+```{javascript}
+// Inspect the imported whaling-area table
+print("Whaling areas", whaling_areas_gee);
+
+// View the first record and its properties
+print("First record", whaling_areas_gee.first());
+```
+
+```{javascript}
+// 1. CREATE PROPORTIONAL WHALING-AREA POINTS
+
+// Assign a display color to each dominant operation type
+var operationColors = ee.Dictionary({
+'Aboriginal': '1B9E77',
+'Commercial': 'D95F02',
+'Illegal': '000000',
+'Special permit': '7570B3',
+'Unknown': 'FFD92F'
+});
+
+// Convert each whaling-area bounding box into a representative center point
+var whaling_points = whaling_areas_gee.map(function(feature) {
+
+// Extract geographic boundaries
+var minLat = ee.Number(feature.get('min_lat'));
+var maxLat = ee.Number(feature.get('max_lat'));
+var minLon = ee.Number(feature.get('min_lon'));
+var maxLon = ee.Number(feature.get('max_lon'));
+
+// Calculate the representative center latitude
+var centerLat = minLat.add(maxLat).divide(2);
+
+// Calculate the representative center longitude
+// Correct for whaling areas that cross the International Date Line
+var lonSpan = maxLon.subtract(minLon);
+
+var centerLon = ee.Number(
+ee.Algorithms.If(
+lonSpan.gt(180),
+minLon.add(maxLon.add(360)).divide(2),
+minLon.add(maxLon).divide(2)
+)
+);
+
+// Convert longitudes greater than 180 back into the -180 to 180 range
+centerLon = ee.Number(
+ee.Algorithms.If(
+centerLon.gt(180),
+centerLon.subtract(360),
+centerLon
+)
+);
+
+// Create a point at the center of the whaling area
+var point = ee.Geometry.Point([centerLon, centerLat]);
+
+// Extract total catch
+var catchTotal = ee.Number(feature.get('total_catch'));
+
+// Square-root scaling prevents large catches from dominating the map
+var pointSize = catchTotal.sqrt().divide(4).add(3);
+
+// Get the dominant operation type
+var operation = ee.String(feature.get('dominant_operation'));
+
+// Assign its corresponding color
+var operationColor = ee.String(operationColors.get(operation));
+
+// Retain original attributes and attach styling information
+return ee.Feature(point, feature.toDictionary())
+.set('style', {
+pointSize: pointSize,
+pointShape: 'circle',
+color: '303030',
+fillColor: operationColor.cat('99'),
+width: 1
+});
+});
+```
+
+```{javascript}
+// 2. DISPLAY PROPORTIONAL CATCH MAP
+
+// Apply the individual styling stored in each feature
+var whaling_points_vis = whaling_points.style({
+styleProperty: 'style',
+neighborhood: 50
+});
+
+// Add the whaling points to the map
+Map.addLayer(
+whaling_points_vis,
+{},
+'Global whaling catch'
+);
+
+// Set satellite imagery as the default basemap
+Map.setOptions('SATELLITE');
+
+// Set initial global view
+Map.setCenter(0, 25, 2);
+```
+
+```{javascript}
+// 3. ADD OPERATION TYPE LEGEND
+
+// Create legend panel
+var legend = ui.Panel({
+style: {
+position: 'bottom-left',
+padding: '8px 12px',
+backgroundColor: 'white'
+}
+});
+
+// Add map title
+legend.add(
+ui.Label({
+value: 'Global Whaling Activity, 1986–2024',
+style: {
+fontWeight: 'bold',
+fontSize: '16px',
+margin: '0 0 10px 0'
+}
+})
+);
+
+// Add legend subtitle
+legend.add(
+ui.Label({
+value: 'Dominant Operation Type',
+style: {
+fontWeight: 'bold',
+fontSize: '14px',
+margin: '0 0 6px 0'
+}
+})
+);
+
+// Helper function for adding one legend row
+function addLegendRow(color, label) {
+
+var colorBox = ui.Label({
+style: {
+backgroundColor: '#' + color,
+padding: '8px',
+margin: '0 6px 4px 0'
+}
+});
+
+var description = ui.Label({
+value: label,
+style: {
+margin: '0 0 4px 0'
+}
+});
+
+var row = ui.Panel({
+widgets: [colorBox, description],
+layout: ui.Panel.Layout.Flow('horizontal')
+});
+
+legend.add(row);
+}
+
+// Add each operation category
+addLegendRow('1B9E77', 'Aboriginal');
+addLegendRow('D95F02', 'Commercial');
+addLegendRow('000000', 'Illegal');
+addLegendRow('7570B3', 'Special permit');
+addLegendRow('FFD92F', 'Unknown');
+
+// Explain the symbol-size encoding
+legend.add(
+ui.Label({
+value: 'Circle size = cumulative catch',
+style: {
+fontStyle: 'italic',
+fontSize: '11px',
+margin: '6px 0 0 0'
+}
+})
+);
+
+// Add legend to map
+Map.add(legend);
+```
+
+```{javascript}
+// 4. ADD CLICK-TO-INSPECT PANEL
+
+// Create information panel
+var infoPanel = ui.Panel({
+style: {
+position: 'top-left',
+width: '280px',
+padding: '10px',
+backgroundColor: 'white'
+}
+});
+
+// Initial instruction
+infoPanel.add(
+ui.Label({
+value: 'Whaling Area Information',
+style: {
+fontWeight: 'bold',
+fontSize: '16px'
+}
+})
+);
+
+infoPanel.add(
+ui.Label('Click a whaling circle to view details.')
+);
+
+// Add panel to map
+Map.add(infoPanel);
+
+// Respond when the user clicks the map
+Map.onClick(function(coords) {
+
+// Create a point at the clicked coordinates
+var clickPoint = ee.Geometry.Point([coords.lon, coords.lat]);
+
+// Find the nearest whaling-area point within 500 km
+var clickedFeature = whaling_points
+.map(function(feature) {
+return feature.set(
+'click_distance',
+feature.geometry().distance(clickPoint)
+);
+})
+.filter(ee.Filter.lte('click_distance', 500000))
+.sort('click_distance')
+.first();
+
+// Retrieve the selected feature's properties
+clickedFeature.evaluate(function(feature) {
+
+// Clear previous information
+infoPanel.clear();
+
+infoPanel.add(
+ui.Label({
+value: 'Whaling Area Information',
+style: {
+fontWeight: 'bold',
+fontSize: '16px'
+}
+})
+);
+
+// If a whaling point was found near the click
+if (feature) {
+
+var properties = feature.properties;
+
+// Create cleaner display names for selected areas
+var displayArea =
+properties.area === 'CanadaW,Arctic' ? 'Arctic (Canada)' :
+properties.area === 'Canada HudsnBy' ? 'Hudson Bay (Canada)' :
+properties.area === 'W.Indies' ? 'West Indies' :
+properties.area === 'Bonin Is' ? 'Bonin Is (Japan)' :
+properties.area === 'JapnN/Kuril Is' ? 'Kuril Is (Japan)' :
+properties.area === 'Pacific NW' ? 'Pacific NW (Japan)' :
+properties.area;
+
+// Add area name
+infoPanel.add(
+ui.Label({
+value: displayArea,
+style: {
+fontWeight: 'bold',
+fontSize: '14px',
+margin: '8px 0 6px 0'
+}
+})
+);
+
+// Add total cumulative catch
+infoPanel.add(
+ui.Label(
+'Total catch: ' +
+Number(properties.total_catch).toLocaleString()
+)
+);
+
+// Add dominant operation type
+infoPanel.add(
+ui.Label(
+'Dominant operation: ' +
+properties.dominant_operation
+)
+);
+
+// Add operation breakdown heading
+infoPanel.add(
+ui.Label({
+value: 'Operation Breakdown',
+style: {
+fontWeight: 'bold',
+fontSize: '13px',
+margin: '10px 0 4px 0'
+}
+})
+);
+
+// Add Aboriginal catch if greater than zero
+if (properties.aboriginal_catch > 0) {
+
+infoPanel.add(
+ui.Label(
+'Aboriginal: ' +
+Number(properties.aboriginal_catch).toLocaleString() +
+' (' +
+Number(properties.aboriginal_pct).toFixed(1) +
+'%)'
+)
+);
+
+}
+
+// Add Commercial catch if greater than zero
+if (properties.commercial_catch > 0) {
+
+infoPanel.add(
+ui.Label(
+'Commercial: ' +
+Number(properties.commercial_catch).toLocaleString() +
+' (' +
+Number(properties.commercial_pct).toFixed(1) +
+'%)'
+)
+);
+
+}
+
+// Add Illegal catch if greater than zero
+if (properties.illegal_catch > 0) {
+
+infoPanel.add(
+ui.Label(
+'Illegal: ' +
+Number(properties.illegal_catch).toLocaleString() +
+' (' +
+Number(properties.illegal_pct).toFixed(1) +
+'%)'
+)
+);
+
+}
+
+// Add Special permit catch if greater than zero
+if (properties.special_permit_catch > 0) {
+
+infoPanel.add(
+ui.Label(
+'Special permit: ' +
+Number(properties.special_permit_catch).toLocaleString() +
+' (' +
+Number(properties.special_permit_pct).toFixed(1) +
+'%)'
+)
+);
+
+}
+
+// Add Unknown catch if greater than zero
+if (properties.unknown_catch > 0) {
+
+infoPanel.add(
+ui.Label(
+'Unknown: ' +
+Number(properties.unknown_catch).toLocaleString() +
+' (' +
+Number(properties.unknown_pct).toFixed(1) +
+'%)'
+)
+);
+
+}
+
+} else {
+
+infoPanel.add(
+ui.Label(
+'No whaling area found near this location.'
+)
+);
+
+}
+
+});
+
+});
+```

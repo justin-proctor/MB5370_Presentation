@@ -1,0 +1,800 @@
+---
+title: "R Workflow"
+author: "Justin Proctor"
+format: html
+editor: visual
+---
+
+# MB5370 FINAL PRESENTATION
+
+## A Geodemographic Investigation of Global Whaling Activity
+
+### 1. SETUP
+
+```{r}
+library(tidyverse)
+library(readxl)
+```
+
+### 2. IMPORT & INSPECT
+
+```{r Import the main whaling catch database}
+whaling_raw <- read_excel(
+  "/Users/justinproctor/Desktop/JCU R folder/MB5370/github/MB5370_Presentation/data/whaling_catch_1985_2025.xlsx",
+  sheet = "DB7.2"
+)
+```
+
+```{r Inspect dataset structure}
+glimpse(whaling_raw)
+```
+
+```{r Inspect variable names}
+names(whaling_raw)
+```
+
+```{r Summarize raw dataset}
+summary(whaling_raw)
+```
+
+```{r Inspect key categories}
+unique(whaling_raw$Nation)
+unique(whaling_raw$Area)
+unique(whaling_raw$Ty)
+```
+
+```{r Inspect temporal coverage}
+range(whaling_raw$Year, na.rm = TRUE)
+```
+
+```{r Import whaling area lookup table}
+# Import the lookup table containing the geographic boundaries of each whaling area
+
+areas_raw <- read_excel(
+  "/Users/justinproctor/Desktop/JCU R folder/MB5370/github/MB5370_Presentation/data/whaling_catch_1985_2025.xlsx",
+  sheet = "Areas"
+)
+```
+
+```{r Inspect whaling area lookup table}
+glimpse(areas_raw)
+```
+
+```{r View area lookup table}
+head(areas_raw, 10)
+```
+
+### 3. CLEAN & STANDARDIZE
+
+```{r Clean and standardize key variables}
+whaling_clean <- whaling_raw |>
+
+  # Keep records from 1986 onward to match the post-moratorium study period
+  filter(Year >= 1986) |>
+
+  # Rename key variables so the analysis code is easier to read
+  rename(
+    year = Year,
+    ocean = Oc,
+    area = Area,
+    expedition_code = Excode,
+    nation = Nation,
+    operation_type = Ty,
+    total_catch = Total,
+    total_lost = TotalLost
+  ) |>
+
+# Convert abbreviated operation codes into descriptive categories
+mutate(
+  operation_type = case_when(
+    operation_type == "A"  ~ "Aboriginal",
+    operation_type == "C"  ~ "Commercial",
+    operation_type == "Co" ~ "Commercial",
+    operation_type == "Cr" ~ "Commercial",
+    operation_type == "I"  ~ "Illegal",
+    operation_type == "S"  ~ "Special permit",
+    operation_type == "S*" ~ "Special permit",
+    operation_type == "U"  ~ "Unknown",
+    operation_type == "-"  ~ "No catch",
+    TRUE ~ operation_type
+  )
+) |>
+
+# Remove records explicitly coded as having no catch
+filter(operation_type != "No catch")
+```
+
+```{r Check cleaned operation categories}
+count(whaling_clean, operation_type)
+```
+
+#### Exploratory Summary
+
+```{r Total catch by nation}
+
+nation_summary <- whaling_clean |>
+
+  group_by(nation) |>
+
+  summarise(
+    total_catch = sum(total_catch, na.rm = TRUE)
+  ) |>
+
+  arrange(desc(total_catch))
+
+nation_summary
+```
+
+### 4. TIDY DATA
+
+```{r Convert species columns into tidy format}
+
+# Create a lookup vector to convert abbreviated species codes into readable names
+species_lookup <- c(
+  "TBlue" = "Blue Whale",
+  "PBlue" = "Pygmy Blue Whale",
+  "Fin"   = "Fin Whale",
+  "Spm"   = "Sperm Whale",
+  "Hbk"   = "Humpback Whale",
+  "Sei"   = "Sei Whale",
+  "Bryd"  = "Bryde's Whale",
+  "Mi:C"  = "Common Minke Whale",
+  "Mi:A"  = "Antarctic Minke Whale",
+  "Gray"  = "Gray Whale",
+  "Bhd"   = "Bowhead Whale",
+  "Ri"    = "Right Whale",
+  "Unsp"  = "Unspecified"
+)
+
+whaling_tidy <- whaling_clean |>
+
+  # Convert the wide species columns into a tidy long-format structure
+  pivot_longer(
+    cols = TBlue:Unsp,
+    names_to = "species",
+    values_to = "catch"
+  ) |>
+
+  # Replace abbreviated species codes with descriptive names
+  mutate(
+    species = recode(species, !!!species_lookup)
+  ) |>
+
+  # Keep only rows representing an actual catch of that species
+  filter(catch > 0)
+```
+
+```{r Inspect tidy dataset}
+glimpse(whaling_tidy)
+```
+
+### 5. GEOGRAPHIC ANALYSIS
+
+```{r Prepare geographic data for Google Earth Engine}
+
+# Convert coordinate strings such as "70W" and "40N" into signed decimal degrees
+convert_coord <- function(x) {
+  
+  value <- parse_number(x)
+  direction <- str_extract(x, "[NSEW]")
+  
+  if_else(
+    direction %in% c("S", "W"),
+    -value,
+    value
+  )
+}
+
+
+# Clean the geographic lookup table and convert coordinate values
+areas_clean <- areas_raw |>
+  
+  rename(
+    ocean = Oc,
+    area = Area,
+    min_lat = MIN.lat,
+    max_lat = MAX.lat,
+    min_lon = MIN.lon,
+    max_lon = MAX.lon
+  ) |>
+  
+  mutate(
+    min_lat = convert_coord(min_lat),
+    max_lat = convert_coord(max_lat),
+    min_lon = convert_coord(min_lon),
+    max_lon = convert_coord(max_lon)
+  )
+
+
+# Calculate the total number of whales caught within each geographic area
+area_summary <- whaling_clean |>
+  
+  group_by(ocean, area) |>
+  
+  summarise(
+    total_catch = sum(total_catch, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+
+# Calculate catch totals for each operation type within each geographic area
+area_operation <- whaling_clean |>
+  
+  group_by(ocean, area, operation_type) |>
+  
+  summarise(
+    operation_catch = sum(total_catch, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+
+# Convert operation types into separate columns for each whaling area
+area_operation_wide <- area_operation |>
+  
+  pivot_wider(
+    names_from = operation_type,
+    values_from = operation_catch,
+    values_fill = 0
+  ) |>
+  
+  # Rename columns so they are simple to use later in Google Earth Engine
+  rename(
+    aboriginal_catch = Aboriginal,
+    commercial_catch = Commercial,
+    illegal_catch = Illegal,
+    special_permit_catch = `Special permit`,
+    unknown_catch = Unknown
+  )
+  
+# Identify the operation type responsible for the largest catch in each area
+area_dominant <- area_operation |>
+  
+  group_by(ocean, area) |>
+  
+  slice_max(
+    order_by = operation_catch,
+    n = 1,
+    with_ties = FALSE
+  ) |>
+  
+  ungroup() |>
+  
+  rename(
+    dominant_operation = operation_type
+  ) |>
+  
+  select(
+    ocean,
+    area,
+    dominant_operation
+  )
+
+
+# Combine total catch, operation breakdown, dominant operation and geographic boundaries
+whaling_gee <- area_summary |>
+  
+  left_join(
+    area_operation_wide,
+    by = c("ocean", "area")
+  ) |>
+  
+  left_join(
+    area_dominant,
+    by = c("ocean", "area")
+  ) |>
+  
+  left_join(
+    areas_clean,
+    by = c("ocean", "area")
+  ) |>
+  
+  # Calculate the percentage contribution of each operation type
+  mutate(
+    aboriginal_pct = round((aboriginal_catch / total_catch) * 100, 1),
+    commercial_pct = round((commercial_catch / total_catch) * 100, 1),
+    illegal_pct = round((illegal_catch / total_catch) * 100, 1),
+    special_permit_pct = round((special_permit_catch / total_catch) * 100, 1),
+    unknown_pct = round((unknown_catch / total_catch) * 100, 1)
+  ) |>
+  
+  # Arrange columns into a logical order for Google Earth Engine
+  select(
+    area,
+    ocean,
+    total_catch,
+    dominant_operation,
+    
+    aboriginal_catch,
+    aboriginal_pct,
+    
+    commercial_catch,
+    commercial_pct,
+    
+    illegal_catch,
+    illegal_pct,
+    
+    special_permit_catch,
+    special_permit_pct,
+    
+    unknown_catch,
+    unknown_pct,
+    
+    min_lat,
+    max_lat,
+    min_lon,
+    max_lon
+  )
+
+
+# Inspect the completed dataset before exporting
+whaling_gee
+```
+
+```{r Export geographic dataset for Google Earth Engine}
+
+# Create an outputs folder if one does not already exist
+dir.create(
+  "outputs",
+  showWarnings = FALSE
+)
+
+# Export the cleaned geographic summary as a CSV for Google Earth Engine
+write_csv(
+  whaling_gee,
+  "outputs/whaling_areas_gee.csv"
+)
+```
+
+### 6. DEMOGRAPHIC ANALYSIS
+
+```{r Summarize catch by nation and operation type}
+
+# Summarize cumulative catch for each nation and operation type
+nation_operation_summary <- whaling_clean |>
+  
+  group_by(nation, operation_type) |>
+  
+  summarise(
+    total_catch = sum(total_catch, na.rm = TRUE),
+    .groups = "drop"
+  ) |>
+  
+  # Calculate total catch for each nation so bars can be ordered by magnitude
+  group_by(nation) |>
+  
+  mutate(
+    nation_total = sum(total_catch)
+  ) |>
+  
+  ungroup()
+
+nation_operation_summary
+```
+
+```{r Plot catch by nation and operation type}
+
+# Plot cumulative catch by nation, with operation type shown by color
+ggplot(
+  nation_operation_summary,
+  aes(
+    x = reorder(nation, nation_total),
+    y = total_catch,
+    fill = operation_type
+  )
+) +
+  
+  # Stack operation types to show the composition of each nation's total catch
+  geom_col() +
+  
+  # Flip coordinates so nation names are easier to read
+  coord_flip() +
+  
+  # Use the same operation-type colors as the Google Earth Engine map
+  scale_fill_manual(
+    values = c(
+      "Aboriginal" = "#1B9E77",
+      "Commercial" = "#D95F02",
+      "Illegal" = "#000000",
+      "Special permit" = "#7570B3",
+      "Unknown" = "#FFD92F"
+    )
+  ) +
+  
+  # Format the catch axis with commas
+  scale_y_continuous(
+    labels = scales::comma,
+    expand = expansion(mult = c(0, 0.05))
+  ) +
+  
+  # Add figure labels
+  labs(
+    title = "Global Whale Catch by Nation and Operation Type",
+    subtitle = "Cumulative reported catch, 1986–2024",
+    x = NULL,
+    y = "Total catch",
+    fill = "Operation type"
+  ) +
+  
+  # Apply a clean presentation theme
+  theme_classic() +
+  
+  theme(
+    plot.title = element_text(face = "bold"),
+    legend.position = "right"
+  )
+```
+
+### 7. TEMPORAL ANALYSIS
+
+```{r Summarize annual catch by operation type}
+
+# Summarize total whale catch for each year and operation type
+annual_operation_summary <- whaling_clean |>
+  
+  group_by(year, operation_type) |>
+  
+  summarise(
+    total_catch = sum(total_catch, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+
+# Calculate total catch across all operation types for each year
+annual_total_summary <- whaling_clean |>
+  
+  group_by(year) |>
+  
+  summarise(
+    annual_catch = sum(total_catch, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+
+# Inspect the annual catch summaries
+annual_operation_summary
+
+annual_total_summary
+```
+
+```{r Plot temporal trends by operation type}
+
+# Plot annual catch as separate trends for each operation type
+ggplot(
+  annual_operation_summary,
+  aes(
+    x = year,
+    y = total_catch,
+    color = operation_type
+  )
+) +
+  
+  # Connect annual catches to show temporal trends
+  geom_line(
+    linewidth = 1.2
+  ) +
+  
+  # Add subtle annual observations to give the trends more visual definition
+  geom_point(
+    size = 1.5,
+    alpha = 0.8
+  ) +
+  
+  # Use the same operation-type colors as the other figures
+  scale_color_manual(
+    values = c(
+      "Aboriginal" = "#1B9E77",
+      "Commercial" = "#D95F02",
+      "Illegal" = "#000000",
+      "Special permit" = "#7570B3",
+      "Unknown" = "#FFD92F"
+    )
+  ) +
+  
+  # Display years at regular intervals
+  scale_x_continuous(
+    breaks = seq(1986, 2024, by = 5),
+    expand = expansion(mult = c(0.01, 0.02))
+  ) +
+  
+  # Format annual catch values with commas
+  scale_y_continuous(
+    labels = scales::comma,
+    breaks = seq(0, 6000, by = 1000),
+    expand = expansion(mult = c(0, 0.05))
+  ) +
+  
+  # Add figure labels
+  labs(
+    title = "Global Whale Catch Through Time",
+    subtitle = "Annual reported catch by operation type, 1986–2024",
+    x = "Year",
+    y = "Annual catch",
+    color = NULL
+  ) +
+  
+  # Use distinct x and y axes without background gridlines
+  theme_classic() +
+  
+  theme(
+    plot.title = element_text(
+      face = "bold",
+      size = 16
+    ),
+    
+    plot.subtitle = element_text(
+      size = 12,
+      margin = margin(b = 12)
+    ),
+    
+    # Place the legend beneath the figure
+    legend.position = "bottom",
+    
+    # Keep legend categories on a single horizontal row
+    legend.direction = "horizontal",
+    
+    axis.title = element_text(size = 11),
+    axis.text = element_text(size = 10)
+  ) +
+  
+  guides(
+    color = guide_legend(
+      nrow = 1,
+      byrow = TRUE
+    )
+  )
+```
+
+### 8. SPECIES COMPOSITION BY OPERATION TYPE
+
+```{r Summarize catch by species and operation type}
+
+# Summarize cumulative catch for each species and operation type
+species_operation_summary <- whaling_tidy |>
+  
+  group_by(species, operation_type) |>
+  
+  summarise(
+    total_catch = sum(catch, na.rm = TRUE),
+    .groups = "drop"
+  ) |>
+  
+  # Calculate the total catch for each species so bars can be ordered by magnitude
+  group_by(species) |>
+  
+  mutate(
+    species_total = sum(total_catch)
+  ) |>
+  
+  ungroup()
+
+species_operation_summary
+```
+
+```{r Plot catch by species and operation type}
+
+# Plot cumulative catch by species, with operation type shown by color
+ggplot(
+  species_operation_summary,
+  aes(
+    x = reorder(species, species_total),
+    y = total_catch,
+    fill = operation_type
+  )
+) +
+  
+  # Stack operation types within each species total
+  geom_col() +
+  
+  # Flip coordinates so species names are easier to read
+  coord_flip() +
+  
+  # Use the same operation-type colors as the other figures
+  scale_fill_manual(
+    values = c(
+      "Aboriginal" = "#1B9E77",
+      "Commercial" = "#D95F02",
+      "Illegal" = "#000000",
+      "Special permit" = "#7570B3",
+      "Unknown" = "#FFD92F"
+    )
+  ) +
+  
+  # Format catch values with commas
+  scale_y_continuous(
+    labels = scales::comma,
+    expand = expansion(mult = c(0, 0.05))
+  ) +
+  
+  # Add figure labels
+  labs(
+    title = "Global Whale Catch by Species and Operation Type",
+    subtitle = "Cumulative reported catch, 1986–2024",
+    x = NULL,
+    y = "Total catch",
+    fill = "Operation type"
+  ) +
+  
+  # Apply the same clean presentation style as the demographic figure
+  theme_classic() +
+  
+  theme(
+    plot.title = element_text(face = "bold"),
+    legend.position = "right"
+  )
+```
+
+### 9. SPECIES COMPOSITION BY NATION
+
+```{r Summarize species catch by nation}
+
+# Define the major whaling nations to include in the temporal comparison
+major_nations <- c(
+  "Japan",
+  "Norway",
+  "Denmark",
+  "USSR",
+  "Russia",
+  "United States",
+  "Iceland",
+  "Indonesia",
+  "Korea",
+  "Canada"
+)
+
+# Summarize cumulative catch for each species within each nation
+nation_species_summary <- whaling_tidy |>
+    
+  # Retain the major whaling nations for a readable comparison
+  filter(nation %in% major_nations) |>
+  
+  group_by(nation, species) |>
+  
+  summarise(
+    total_catch = sum(catch, na.rm = TRUE),
+    .groups = "drop"
+  ) |>
+  
+  # Calculate total catch for each nation so bars can be ordered by magnitude
+  group_by(nation) |>
+  
+  mutate(
+    nation_total = sum(total_catch)
+  ) |>
+  
+  ungroup()
+
+nation_species_summary
+```
+
+```{r Plot species catch by nation}
+
+# Plot cumulative catch by nation, with species shown by color
+ggplot(
+  nation_species_summary,
+  aes(
+    x = reorder(nation, nation_total),
+    y = total_catch,
+    fill = species
+  )
+) +
+  
+  # Stack species to show the composition of each nation's total catch
+  geom_col() +
+  
+  # Flip coordinates so nation names are easier to read
+  coord_flip() +
+  
+  # Format catch values with commas
+  scale_y_continuous(
+    labels = scales::comma,
+    expand = expansion(mult = c(0, 0.05))
+  ) +
+  
+  # Add figure labels
+  labs(
+    title = "Species Composition of Whale Catch by Nation",
+    subtitle = "Cumulative reported catch, 1986–2024",
+    x = NULL,
+    y = "Total catch",
+    fill = "Species"
+  ) +
+  
+  # Apply a clean presentation theme
+  theme_classic() +
+  
+  theme(
+    plot.title = element_text(face = "bold"),
+    legend.position = "right"
+  )
+```
+
+### 10. SPECIES COMPOSITION BY NATION AND YEAR
+
+```{r Summarize annual species catch by major nation}
+
+# Define the major whaling nations to include in the temporal comparison
+major_nations <- c(
+  "Japan",
+  "Norway",
+  "Denmark",
+  "USSR",
+  "Russia",
+  "United States",
+  "Iceland",
+  "Indonesia",
+  "Korea",
+  "Canada"
+)
+
+
+# Summarize annual species catch within each major nation
+nation_species_year <- whaling_tidy |>
+  
+  # Retain the major whaling nations for a readable comparison
+  filter(nation %in% major_nations) |>
+  
+  group_by(
+    nation,
+    year,
+    species
+  ) |>
+  
+  summarise(
+    total_catch = sum(catch, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+nation_species_year
+```
+
+```{r Plot species composition through time by nation}
+
+# Plot annual species composition separately for each major whaling nation
+ggplot(
+  nation_species_year,
+  aes(
+    x = year,
+    y = total_catch,
+    fill = species
+  )
+) +
+  
+  # Stack species to show both annual catch and species composition
+  geom_area() +
+  
+  # Create a separate temporal panel for each nation
+  facet_wrap(
+    ~ nation,
+    ncol = 2,
+    scales = "free_y"
+  ) +
+  
+  # Display years at regular intervals
+  scale_x_continuous(
+    breaks = seq(1986, 2024, by = 10)
+  ) +
+  
+  # Format catch values with commas
+  scale_y_continuous(
+    labels = scales::comma,
+    expand = expansion(mult = c(0, 0.05))
+  ) +
+  
+  # Add figure labels
+  labs(
+    title = "Species Composition of Whale Catch Through Time",
+    subtitle = "Major whaling nations, 1986–2024",
+    x = "Year",
+    y = "Annual catch",
+    fill = "Species"
+  ) +
+  
+  # Apply a clean presentation theme
+  theme_classic() +
+  
+  theme(
+    plot.title = element_text(face = "bold"),
+    legend.position = "right",
+    strip.text = element_text(face = "bold")
+  )
+```
