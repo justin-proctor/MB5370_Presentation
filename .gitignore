@@ -23,3 +23,6 @@ archive/
 
 # Keywords to ignore
 *archive
+
+# Ignore temporary Excel files
+~$*.xlsx
